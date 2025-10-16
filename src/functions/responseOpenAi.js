@@ -63,12 +63,12 @@ app.http('responseOpenAi', {
     const response = await openai.responses.create({
       model: params.model,
       tools: [{
-        type: "web_search_preview",
+        type: 'web_search_preview',
         user_location: {
-            type: "approximate",
-            country: "NO"
+          type: 'approximate',
+          country: 'NO'
         }
-    }],
+      }],
       previous_response_id: params.response_id,
       input
     })
