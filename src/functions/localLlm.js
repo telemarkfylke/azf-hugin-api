@@ -46,7 +46,7 @@ app.http('localLlm', {
     }
 
     // Proxy request to on-prem Ollama via Hybrid Connection
-    const baseUrl = process.env.OLLAMA_BASE_URL || 'http://kiserver:80'
+    const baseUrl = process.env.OLLAMA_BASE_URL || 'http://kiserver:1337'
     const hostHeader = process.env.OLLAMA_HOST_HEADER || 'localhost'
     const timeoutMs = parseInt(process.env.OLLAMA_TIMEOUT_MS, 10) || 120000
 
