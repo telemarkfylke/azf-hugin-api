@@ -611,3 +611,90 @@ app.http('localLlm', {
     }
   }
 })
+
+/**
+ * Raw TCP socket test — bypasses all HTTP parsing to see exactly what bytes
+ * come back through the Azure Hybrid Connection. Hit this with curl to debug.
+ */
+app.http('localLlmRawTest', {
+  methods: ['GET', 'POST'],
+  authLevel: 'anonymous',
+  route: 'localLlmRawTest',
+  handler: async (request, context) => {
+    // Validate token — same as main endpoint
+    try {
+      const accesstoken = request.headers.get('Authorization')
+      await validateToken(accesstoken, { role: [`${process.env.appName}.basic`, `${process.env.appName}.admin`] })
+    } catch (error) {
+      return {
+        status: 401,
+        jsonBody: { error: error.response?.data || error?.stack || error.message }
+      }
+    }
+
+    const baseUrl = process.env.OLLAMA_BASE_URL || 'http://kiserver:1337'
+    const parsed = new URL(baseUrl)
+    const host = parsed.hostname
+    const port = parseInt(parsed.port, 10) || 80
+    const path = '/prod/api/tags'
+    const hostHeader = process.env.OLLAMA_HOST_HEADER || 'localhost'
+
+    const rawRequestLine = `GET ${path} HTTP/1.1\r\nHost: ${hostHeader}\r\nConnection: close\r\n\r\n`
+
+    const rawResult = await new Promise((resolve) => {
+      const chunks = []
+      let totalBytes = 0
+      const start = Date.now()
+
+      function done (extra) {
+        resolve({
+          rawRequestSent: rawRequestLine.trim(),
+          elapsedMs: Date.now() - start,
+          totalBytes,
+          chunkCount: chunks.length,
+          chunks,
+          ...extra
+        })
+      }
+
+      const client = net.createConnection({ host, port }, () => {
+        client.write(rawRequestLine)
+      })
+
+      client.setTimeout(15000)
+
+      client.on('data', (data) => {
+        totalBytes += data.length
+        chunks.push({
+          chunkIndex: chunks.length,
+          byteLength: data.length,
+          hex: data.toString('hex').substring(0, 200),
+          utf8: data.toString('utf-8').substring(0, 500)
+        })
+      })
+
+      client.on('end', () => done({ ok: true }))
+
+      client.on('timeout', () => {
+        client.destroy()
+        done({ ok: false, error: 'TCP socket timed out after 15s' })
+      })
+
+      client.on('error', (err) => {
+        done({
+          ok: false,
+          error: { message: err.message, code: err.code, errno: err.errno, syscall: err.syscall }
+        })
+      })
+    })
+
+    return {
+      status: 200,
+      jsonBody: {
+        test: 'raw TCP socket through hybrid connection',
+        target: { host, port, path, hostHeader },
+        result: rawResult
+      }
+    }
+  }
+})
