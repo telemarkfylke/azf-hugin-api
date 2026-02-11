@@ -1,6 +1,23 @@
 const { app } = require('@azure/functions')
 const { logger } = require('@vtfk/logger')
+const dns = require('dns')
 const validateToken = require('../lib/validateToken')
+
+function extractCauseChain (error, depth = 0) {
+  if (!error.cause || depth >= 3) return undefined
+  const cause = error.cause
+  const result = {
+    message: cause.message,
+    code: cause.code,
+    errno: cause.errno,
+    syscall: cause.syscall,
+    address: cause.address,
+    port: cause.port
+  }
+  const nested = extractCauseChain(cause, depth + 1)
+  if (nested) result.cause = nested
+  return result
+}
 
 app.http('localLlm', {
   methods: ['POST'],
@@ -49,14 +66,26 @@ app.http('localLlm', {
     const baseUrl = process.env.OLLAMA_BASE_URL || 'http://kiserver:1337'
     const hostHeader = process.env.OLLAMA_HOST_HEADER || 'localhost'
     const timeoutMs = parseInt(process.env.OLLAMA_TIMEOUT_MS, 10) || 120000
+    const targetUrl = `${baseUrl}/prod/api/generate`
+
+    // Pre-flight DNS check
+    let dnsResult
+    try {
+      const hostname = new URL(baseUrl).hostname
+      const { address, family } = await dns.promises.lookup(hostname)
+      dnsResult = { hostname, address, family }
+    } catch (dnsError) {
+      dnsResult = { error: dnsError.message, code: dnsError.code }
+    }
 
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), timeoutMs)
+    const startTime = Date.now()
 
     try {
-      logger('info', ['localLlm', `Proxying to ${baseUrl}/prod/api/generate`, `model=${model}`])
+      logger('info', ['localLlm', `Proxying to ${targetUrl}`, `model=${model}`])
 
-      const ollamaResponse = await fetch(`${baseUrl}/prod/api/generate`, {
+      const ollamaResponse = await fetch(targetUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -73,7 +102,19 @@ app.http('localLlm', {
         logger('error', ['localLlm', `Ollama returned ${ollamaResponse.status}:`, errorBody])
         return {
           status: ollamaResponse.status,
-          jsonBody: { error: `Ollama error: ${errorBody}` }
+          jsonBody: {
+            error: `Ollama error: ${errorBody}`,
+            diagnostics: {
+              timestamp: new Date().toISOString(),
+              elapsedMs: Date.now() - startTime,
+              targetUrl,
+              hostHeader,
+              dns: dnsResult,
+              ollamaStatus: ollamaResponse.status,
+              ollamaStatusText: ollamaResponse.statusText,
+              ollamaHeaders: Object.fromEntries(ollamaResponse.headers.entries())
+            }
+          }
         }
       }
 
@@ -87,14 +128,42 @@ app.http('localLlm', {
         logger('error', ['localLlm', `Request timed out after ${timeoutMs}ms`])
         return {
           status: 504,
-          jsonBody: { error: `Request to on-prem Ollama timed out after ${timeoutMs}ms` }
+          jsonBody: {
+            error: `Request to on-prem Ollama timed out after ${timeoutMs}ms`,
+            diagnostics: {
+              timestamp: new Date().toISOString(),
+              elapsedMs: Date.now() - startTime,
+              targetUrl,
+              hostHeader,
+              timeoutMs,
+              dns: dnsResult
+            }
+          }
         }
       }
 
       logger('error', ['localLlm', 'Failed to reach on-prem Ollama:', error.message])
       return {
         status: 418,
-        jsonBody: { error: `This is from the function!: Failed to reach on-prem Ollama: ${error.message}` }
+        jsonBody: {
+          error: `Failed to reach on-prem Ollama: ${error.message}`,
+          diagnostics: {
+            timestamp: new Date().toISOString(),
+            elapsedMs: Date.now() - startTime,
+            targetUrl,
+            hostHeader,
+            timeoutMs,
+            dns: dnsResult,
+            error: {
+              message: error.message,
+              code: error.code,
+              type: error.type,
+              errno: error.errno,
+              syscall: error.syscall,
+              cause: extractCauseChain(error)
+            }
+          }
+        }
       }
     }
   }
