@@ -1,6 +1,8 @@
 const { app } = require('@azure/functions')
 const { logger } = require('@vtfk/logger')
 const dns = require('dns')
+const http = require('http')
+const https = require('https')
 const net = require('net')
 const os = require('os')
 const validateToken = require('../lib/validateToken')
@@ -394,6 +396,84 @@ async function runFullDiagnostics (baseUrl, hostHeader, targetUrl) {
   }
 }
 
+/**
+ * HTTP request using Node's http/https modules — more tolerant of Azure Relay framing quirks
+ * than native fetch (undici), which can throw HPE_INVALID_CONSTANT through hybrid connections.
+ */
+function robustRequest (url, { method = 'POST', headers = {}, body, timeoutMs = 120000, signal } = {}) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url)
+    const transport = parsed.protocol === 'https:' ? https : http
+    const reqHeaders = {
+      ...headers,
+      Connection: 'close' // Avoid keep-alive issues through Azure Relay
+    }
+    if (body) {
+      reqHeaders['Content-Length'] = Buffer.byteLength(body)
+    }
+
+    const req = transport.request({
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method,
+      headers: reqHeaders,
+      // Disable connection reuse — each request gets a fresh socket through the relay
+      agent: false
+    }, (res) => {
+      const chunks = []
+      res.on('data', (chunk) => chunks.push(chunk))
+      res.on('end', () => {
+        const rawBody = Buffer.concat(chunks).toString('utf-8')
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode,
+          statusText: res.statusMessage,
+          headers: res.headers,
+          text: () => Promise.resolve(rawBody),
+          json: () => Promise.resolve(JSON.parse(rawBody))
+        })
+      })
+      res.on('error', reject)
+    })
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`Request timed out after ${timeoutMs}ms`))
+    })
+
+    req.on('error', (err) => {
+      if (signal && signal.aborted) {
+        const abortErr = new Error('The operation was aborted')
+        abortErr.name = 'AbortError'
+        reject(abortErr)
+      } else {
+        reject(err)
+      }
+    })
+
+    if (signal) {
+      if (signal.aborted) {
+        req.destroy()
+        const abortErr = new Error('The operation was aborted')
+        abortErr.name = 'AbortError'
+        reject(abortErr)
+        return
+      }
+      signal.addEventListener('abort', () => {
+        req.destroy()
+        const abortErr = new Error('The operation was aborted')
+        abortErr.name = 'AbortError'
+        reject(abortErr)
+      }, { once: true })
+    }
+
+    if (body) {
+      req.write(body)
+    }
+    req.end()
+  })
+}
+
 app.http('localLlm', {
   methods: ['POST'],
   authLevel: 'anonymous',
@@ -448,15 +528,16 @@ app.http('localLlm', {
     const startTime = Date.now()
 
     try {
-      logger('info', ['localLlm', `Proxying to ${targetUrl}`, `model=${model}`])
+      logger('info', ['localLlm', `Proxying to ${targetUrl}`, `model=${model}`, 'using http/https module (not fetch)'])
 
-      const ollamaResponse = await fetch(targetUrl, {
+      const ollamaResponse = await robustRequest(targetUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Host: hostHeader
         },
         body: JSON.stringify({ model, prompt, stream }),
+        timeoutMs,
         signal: controller.signal
       })
 
@@ -474,7 +555,7 @@ app.http('localLlm', {
               elapsedMs: Date.now() - startTime,
               ollamaStatus: ollamaResponse.status,
               ollamaStatusText: ollamaResponse.statusText,
-              ollamaHeaders: Object.fromEntries(ollamaResponse.headers.entries())
+              ollamaHeaders: ollamaResponse.headers
             },
             diagnostics
           }
