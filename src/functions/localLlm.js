@@ -93,8 +93,8 @@ app.http('localLlm', {
 
       logger('error', ['localLlm', 'Failed to reach on-prem Ollama:', error.message])
       return {
-        status: 502,
-        jsonBody: { error: `Failed to reach on-prem Ollama: ${error.message}` }
+        status: 418,
+        jsonBody: { error: `This is from the function!: Failed to reach on-prem Ollama: ${error.message}` }
       }
     }
   }
