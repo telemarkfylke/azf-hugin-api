@@ -419,7 +419,10 @@ function robustRequest (url, { method = 'POST', headers = {}, body, timeoutMs = 
       method,
       headers: reqHeaders,
       // Disable connection reuse — each request gets a fresh socket through the relay
-      agent: false
+      agent: false,
+      // Azure Hybrid Connection relay can return responses that don't strictly
+      // conform to HTTP/1.1 framing — use the lenient parser to avoid HPE_INVALID_CONSTANT
+      insecureHTTPParser: true
     }, (res) => {
       const chunks = []
       res.on('data', (chunk) => chunks.push(chunk))
