@@ -27,13 +27,18 @@ app.http('localLlm', {
       checks: {}
     }
 
+    // Check outbound IP to verify VPN routing is active
     try {
-      // Check outbound IP to verify VPN routing is active
       const ipResponse = await fetch('https://api.ipify.org?format=json')
       const ipData = await ipResponse.json()
       results.checks.outboundPublicIp = ipData.ip
+    } catch (error) {
+      logger('error', ['localLlm', 'ipify failed', error?.message, error?.cause?.message, error?.cause?.code])
+      results.checks.outboundPublicIp = { error: error.message, cause: error?.cause?.message, code: error?.cause?.code }
+    }
 
-      // Request Ollama tags through Traefik
+    // Request Ollama tags through Traefik
+    try {
       const startTime = Date.now()
       const response = await fetch(`http://${ON_PREM_IP}/prod/api/tags`, {
         method: 'GET',
@@ -55,9 +60,9 @@ app.http('localLlm', {
 
       logger('info', ['localLlm', `status=${response.status}`, `latency=${results.checks.latencyMs}ms`])
     } catch (error) {
-      logger('error', ['localLlm', error?.message, error?.stack])
+      logger('error', ['localLlm', 'ollama failed', error?.message, error?.cause?.message, error?.cause?.code])
       results.success = false
-      results.error = error.message
+      results.error = { message: error.message, cause: error?.cause?.message, code: error?.cause?.code }
     }
 
     return { jsonBody: results }
