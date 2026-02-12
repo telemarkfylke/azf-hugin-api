@@ -21,9 +21,15 @@ app.http('localLlm', {
       }
     }
 
+    const requestHeaders = {
+      Host: TARGET_HOST,
+      Accept: 'application/json'
+    }
+
     const results = {
       timestamp: new Date().toISOString(),
       target: `http://${ON_PREM_IP}/prod/api/tags`,
+      requestHeaders,
       checks: {}
     }
 
@@ -42,15 +48,13 @@ app.http('localLlm', {
       const startTime = Date.now()
       const response = await fetch(`http://${ON_PREM_IP}/prod/api/tags`, {
         method: 'GET',
-        headers: {
-          Host: TARGET_HOST,
-          Accept: 'application/json'
-        },
+        headers: requestHeaders,
         signal: AbortSignal.timeout(10000)
       })
 
       results.checks.httpStatus = response.status
       results.checks.latencyMs = Date.now() - startTime
+      results.checks.responseHeaders = Object.fromEntries(response.headers.entries())
 
       if (response.ok) {
         results.checks.data = await response.json()
