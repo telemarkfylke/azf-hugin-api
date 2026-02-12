@@ -1,3 +1,4 @@
+const http = require('http')
 const { app } = require('@azure/functions')
 const { logger } = require('@vtfk/logger')
 const validateToken = require('../lib/validateToken')
@@ -43,26 +44,37 @@ app.http('localLlm', {
       results.checks.outboundPublicIp = { error: error.message, cause: error?.cause?.message, code: error?.cause?.code }
     }
 
-    // Request Ollama tags through Traefik
+    // Request Ollama tags through Traefik using http module (fetch silently drops the Host header)
     try {
       const startTime = Date.now()
-      const response = await fetch(`http://${ON_PREM_IP}/prod/api/tags`, {
-        method: 'GET',
-        headers: requestHeaders,
-        signal: AbortSignal.timeout(10000)
+      const { statusCode, headers: responseHeaders, body } = await new Promise((resolve, reject) => {
+        const req = http.request({
+          hostname: ON_PREM_IP,
+          path: '/prod/api/tags',
+          method: 'GET',
+          headers: requestHeaders,
+          timeout: 10000
+        }, (res) => {
+          const chunks = []
+          res.on('data', (chunk) => chunks.push(chunk))
+          res.on('end', () => resolve({ statusCode: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString() }))
+        })
+        req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')) })
+        req.on('error', reject)
+        req.end()
       })
 
-      results.checks.httpStatus = response.status
+      results.checks.httpStatus = statusCode
       results.checks.latencyMs = Date.now() - startTime
-      results.checks.responseHeaders = Object.fromEntries(response.headers.entries())
+      results.checks.responseHeaders = responseHeaders
 
-      if (response.ok) {
-        results.checks.data = await response.json()
+      if (statusCode >= 200 && statusCode < 300) {
+        results.checks.data = JSON.parse(body)
       } else {
-        results.checks.errorBody = await response.text()
+        results.checks.errorBody = body
       }
 
-      logger('info', ['localLlm', `status=${response.status}`, `latency=${results.checks.latencyMs}ms`])
+      logger('info', ['localLlm', `status=${statusCode}`, `latency=${results.checks.latencyMs}ms`])
     } catch (error) {
       logger('error', ['localLlm', 'ollama failed', error?.message, error?.cause?.message, error?.cause?.code])
       results.success = false
