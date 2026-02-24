@@ -1,0 +1,19 @@
+name: File Copy Test
+
+on:
+  workflow_dispatch: # Allows you to run this manually from the Actions tab
+
+jobs:
+  copy-files:
+    # Use the label you assigned to your repo-scoped runner
+    runs-on: [self-hosted, ki-server] 
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Verify files exist on server
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Listing files copied to this server:"
+          ls -R
