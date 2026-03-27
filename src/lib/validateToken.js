@@ -32,14 +32,14 @@ const validateRoles = (tokenRoles, role) => {
  * @returns
  */
 
-const validateToken = async (token, options) => {
+const validateToken = async (token, options, scopes=['user_impersonation']) => {
   token = token.replace('Bearer ', '')
   try {
     const decodedToken = await validate(token, {
       tenantId: process.env.tenantId,
       audience: process.env.audience,
       applicationId: process.env.applicationId,
-      scopes: ['user_impersonation']
+      scopes: scopes
     })
     if (validateRoles(decodedToken.payload.roles, options.role)) {
       return true
