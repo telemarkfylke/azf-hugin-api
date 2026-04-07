@@ -1,18 +1,17 @@
 const { app } = require('@azure/functions')
 const { OpenAI } = require('openai')
-const validateToken = require('../lib/validateToken')
+const withAuth = require('../lib/withAuth')
 const { logger } = require('@vtfk/logger')
+
+const roles = [`${process.env.appName}.basic`, `${process.env.appName}.admin`, `${process.env.appName}.skolebotter`, `${process.env.appName}.orgbotter`, `${process.env.appName}.labs`]
 
 app.http('assistantOpenAi', {
   methods: ['GET', 'POST'],
   authLevel: 'anonymous',
-  handler: async (request, context) => {
+  handler: withAuth(roles, async (request) => {
     try {
-      const accesstoken = request.headers.get('Authorization')
-      await validateToken(accesstoken, { role: [`${process.env.appName}.basic`, `${process.env.appName}.admin`, `${process.env.appName}.skolebotter`, `${process.env.appName}.orgbotter`, `${process.env.appName}.labs`] })
-      logger('info', ['assistantOpenAi', 'Token validert'])
       const params = JSON.parse(await request.text())
-      let thread // = formPayload.get('thread_id')
+      let thread
 
       // Velger riktig api-nøkkel basert på flis
       const tile = params.tile
@@ -42,10 +41,7 @@ app.http('assistantOpenAi', {
           })
         } catch (error) {
           logger('error', ['assistantOpenAi', 'Failed to create thread', error.message])
-          return {
-            status: 400,
-            body: JSON.stringify({ error: 'Failed to create thread' })
-          }
+          return { status: 400, jsonBody: { error: 'Failed to create thread' } }
         }
       } else {
         // Henter en eksisterende tråd
@@ -53,10 +49,7 @@ app.http('assistantOpenAi', {
           thread = await openai.beta.threads.retrieve(params.thread_id)
         } catch (error) {
           logger('error', ['assistantOpenAi', 'Failed to retrieve thread', error.message])
-          return {
-            status: 400,
-            body: JSON.stringify({ error: 'Failed to retrieve thread' })
-          }
+          return { status: 400, jsonBody: { error: 'Failed to retrieve thread' } }
         }
         // Oppdaterer tråden med siste melding i messageHistory
         const messageLength = params.messageHistory.length
@@ -67,28 +60,17 @@ app.http('assistantOpenAi', {
           })
         } catch (error) {
           logger('error', ['assistantOpenAi', 'Failed to create message', error.message])
-          return {
-            status: 400,
-            body: JSON.stringify({ error: 'Failed to create message' })
-          }
+          return { status: 400, jsonBody: { error: 'Failed to create message' } }
         }
       }
 
       // Kjører tråden på valgt assistent
       let run
       try {
-        run = await openai.beta.threads.runs.createAndPoll(
-          thread.id,
-          {
-            assistant_id: params.assistant_id
-          }
-        )
+        run = await openai.beta.threads.runs.createAndPoll(thread.id, { assistant_id: params.assistant_id })
       } catch (error) {
         logger('error', ['assistantOpenAi', 'Failed to run assistant', error.message])
-        return {
-          status: 400,
-          body: JSON.stringify({ error: 'Failed to run assistant' })
-        }
+        return { status: 400, jsonBody: { error: 'Failed to run assistant' } }
       }
 
       // List messages in thread
@@ -99,10 +81,7 @@ app.http('assistantOpenAi', {
         }
       } catch (error) {
         logger('error', ['assistantOpenAi', 'Failed to list messages', error.message])
-        return {
-          status: 400,
-          body: JSON.stringify({ error: 'Failed to list messages' })
-        }
+        return { status: 400, jsonBody: { error: 'Failed to list messages' } }
       }
 
       const respons = {
@@ -112,15 +91,10 @@ app.http('assistantOpenAi', {
         messages: messages.data
       }
       logger('info', ['assistantOpenAi', 'Success'])
-      return {
-        body: JSON.stringify(respons)
-      }
+      return { jsonBody: respons }
     } catch (error) {
       logger('error', ['assistantOpenAi', error.message])
-      return {
-        status: 400,
-        body: JSON.stringify({ error: error.message })
-      }
+      return { status: 400, jsonBody: { error: error.message } }
     }
-  }
+  })
 })

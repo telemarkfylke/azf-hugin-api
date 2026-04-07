@@ -1,26 +1,16 @@
 const { app } = require('@azure/functions')
 const { OpenAI } = require('openai')
-const validateToken = require('../lib/validateToken')
-// require("dotenv").config();
+const withAuth = require('../lib/withAuth')
+
+const roles = [`${process.env.appName}.basic`, `${process.env.appName}.admin`]
 
 app.http('structuredOpenAi', {
   methods: ['GET', 'POST'],
   authLevel: 'anonymous',
-  handler: async (request, context) => {
+  handler: withAuth(roles, async (request) => {
     const openai = new OpenAI()
     const params = await JSON.parse(await request.text())
     let msg
-
-    // Validate the token and the role of the user
-    try {
-      const accesstoken = request.headers.get('Authorization')
-      await validateToken(accesstoken, { role: [`${process.env.appName}.basic`, `${process.env.appName}.admin`] })
-    } catch (error) {
-      return {
-        status: 401,
-        jsonBody: { error: error.response?.data || error?.stack || error.message }
-      }
-    }
 
     try {
       msg = [{ role: 'system', content: params.kontekst }]
@@ -43,9 +33,7 @@ app.http('structuredOpenAi', {
         msg.push({ role: 'user', content: params.message })
       }
     } catch (error) {
-      return {
-        jsonBody: { error: error.response?.data || error?.stack || error.message }
-      }
+      return { jsonBody: { error: error.response?.data || error?.stack || error.message } }
     }
     try {
       const completion = await openai.beta.chat.completions.parse({
@@ -55,13 +43,9 @@ app.http('structuredOpenAi', {
         response_format: params.response_format
       })
 
-      return {
-        body: JSON.stringify(completion)
-      }
+      return { jsonBody: completion }
     } catch (error) {
-      return {
-        jsonBody: { error: error.response?.data || error?.stack || error.message }
-      }
+      return { jsonBody: { error: error.response?.data || error?.stack || error.message } }
     }
-  }
+  })
 })

@@ -13,6 +13,7 @@
     "@mistralai/mistralai": "^1.10.0",
     "@vtfk/logger": "^6.3.3",
     "dotenv": "^16.4.7",
+    "jose": "^6.2.2",
     "openai": "^4.92.0",
     "validate-azure-ad-token": "^2.2.0",
     "zod": "^3.25.76"

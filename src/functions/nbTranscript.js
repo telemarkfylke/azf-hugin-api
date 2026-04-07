@@ -1,15 +1,14 @@
 const { app } = require('@azure/functions')
-const validateToken = require('../lib/validateToken')
+const withAuth = require('../lib/withAuth')
 const { BlobServiceClient } = require('@azure/storage-blob')
+
+const roles = [`${process.env.appName}.admin`, `${process.env.appName}.transkripsjon`]
 
 app.http('nbTranscript', {
   methods: ['GET', 'POST'],
   authLevel: 'anonymous',
-  handler: async (request, context) => {
+  handler: withAuth(roles, async (request) => {
     try {
-      const accesstoken = request.headers.get('Authorization')
-      await validateToken(accesstoken, { role: [`${process.env.appName}.admin`, `${process.env.appName}.transkripsjon`] }, [])
-
       // Payload fra klienten
       const formPayload = await request.formData()
       const fileStreams = formPayload.get('filer')
@@ -29,23 +28,14 @@ app.http('nbTranscript', {
       const timestamp = Date.now()
       const metadata = { spraak, format, upn }
       const blockBlobClient = containerClient.getBlockBlobClient(`${timestamp}-${filnavn}`)
-      await blockBlobClient.uploadData(data, {
-        metadata
-      })
+      await blockBlobClient.uploadData(data, { metadata })
 
       // Get the URL of the uploaded blob
       const blobUrl = blockBlobClient.url
 
-      const respons = {
-        data: 'Alt gikk bra',
-        blobUrl
-      }
-      return { jsonBody: respons }
+      return { jsonBody: { data: 'Alt gikk bra', blobUrl } }
     } catch (error) {
-      return {
-        status: 401,
-        body: JSON.stringify({ error: error.message })
-      }
+      return { status: 500, jsonBody: { error: error.message } }
     }
-  }
+  })
 })

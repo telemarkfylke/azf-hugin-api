@@ -1,7 +1,7 @@
 const { app } = require('@azure/functions')
 const { OpenAI } = require('openai')
 const { logger } = require('@vtfk/logger')
-const validateToken = require('../lib/validateToken')
+const withAuth = require('../lib/withAuth')
 const { Readable } = require('stream')
 
 require('dotenv').config()
@@ -9,25 +9,15 @@ require('dotenv').config()
 // Enable HTTP streaming
 app.setup({ enableHttpStream: true })
 
+const roles = [`${process.env.appName}.basic`, `${process.env.appName}.admin`, `${process.env.appName}.dokumentchat`]
+
 app.http('streamResponseOpenAi', {
   methods: ['POST'],
   authLevel: 'anonymous',
-  handler: async (request) => {
+  handler: withAuth(roles, async (request) => {
     try {
       const openai = new OpenAI()
       const params = await JSON.parse(await request.text())
-
-      // Validate the token and the role of the user
-      try {
-        const accesstoken = request.headers.get('Authorization')
-        await validateToken(accesstoken, { role: [`${process.env.appName}.basic`, `${process.env.appName}.admin`, `${process.env.appName}.dokumentchat`] })
-      } catch (error) {
-        logger('error', ['streamResponseOpenAi', 'Error validating token:', error])
-        return {
-          status: 401,
-          jsonBody: { error: error.response?.data || error?.stack || error.message }
-        }
-      }
 
       // Build messages array from params
       const messages = []
@@ -132,10 +122,7 @@ app.http('streamResponseOpenAi', {
       }
     } catch (error) {
       logger('error', ['streamResponseOpenAi', 'Error:', error])
-      return {
-        status: 500,
-        jsonBody: { error: error.message || 'Internal server error' }
-      }
+      return { status: 500, jsonBody: { error: error.message || 'Internal server error' } }
     }
-  }
+  })
 })

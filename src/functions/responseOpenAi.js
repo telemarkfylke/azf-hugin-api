@@ -1,28 +1,18 @@
 const { app } = require('@azure/functions')
 const { OpenAI } = require('openai')
 const { logger } = require('@vtfk/logger')
-const validateToken = require('../lib/validateToken')
+const withAuth = require('../lib/withAuth')
 
 require('dotenv').config()
+
+const roles = [`${process.env.appName}.basic`, `${process.env.appName}.admin`, `${process.env.appName}.dokumentchat`]
 
 app.http('responseOpenAi', {
   methods: ['GET', 'POST'],
   authLevel: 'anonymous',
-  handler: async (request, context) => {
+  handler: withAuth(roles, async (request) => {
     const openai = new OpenAI()
     const params = await JSON.parse(await request.text())
-
-    // Validate the token and the role of the user
-    try {
-      const accesstoken = request.headers.get('Authorization')
-      await validateToken(accesstoken, { role: [`${process.env.appName}.basic`, `${process.env.appName}.admin`, `${process.env.appName}.dokumentchat`] })
-    } catch (error) {
-      logger('error', ['responseOpenAi', 'Error validating token:', error])
-      return {
-        status: 401,
-        jsonBody: { error: error.response?.data || error?.stack || error.message }
-      }
-    }
 
     // Bygger input-objektet
     const input = []
@@ -73,6 +63,6 @@ app.http('responseOpenAi', {
       input
     })
     logger('info', ['responseOpenAi', 'Response:', response.id])
-    return { body: JSON.stringify(response) }
-  }
+    return { jsonBody: response }
+  })
 })

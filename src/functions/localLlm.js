@@ -1,27 +1,17 @@
 const http = require('http')
 const { app } = require('@azure/functions')
 const { logger } = require('@vtfk/logger')
-const validateToken = require('../lib/validateToken')
+const withAuth = require('../lib/withAuth')
 
 const ON_PREM_IP = process.env.ON_PREM_SERVER_IP
 const TARGET_HOST = process.env.OLLAMA_HOST_HEADER || 'kiserver'
 
+const roles = [`${process.env.appName}.basic`, `${process.env.appName}.admin`]
+
 app.http('localLlm', {
   methods: ['GET'],
   authLevel: 'anonymous',
-  handler: async (request, context) => {
-    // Validate token
-    try {
-      const accesstoken = request.headers.get('Authorization')
-      await validateToken(accesstoken, { role: [`${process.env.appName}.basic`, `${process.env.appName}.admin`] })
-    } catch (error) {
-      logger('error', ['localLlm', 'Tokenvalidation', error?.message, error?.stack])
-      return {
-        status: 401,
-        jsonBody: { error: error.response?.data || error?.stack || error.message }
-      }
-    }
-
+  handler: withAuth(roles, async () => {
     const requestHeaders = {
       Host: TARGET_HOST,
       Accept: 'application/json'
@@ -82,5 +72,5 @@ app.http('localLlm', {
     }
 
     return { jsonBody: results }
-  }
+  })
 })

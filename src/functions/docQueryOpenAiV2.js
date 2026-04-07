@@ -1,16 +1,15 @@
 const { app } = require('@azure/functions')
 const { OpenAI } = require('openai')
-const validateToken = require('../lib/validateToken')
+const withAuth = require('../lib/withAuth')
 const { logger } = require('@vtfk/logger')
+
+const roles = [`${process.env.appName}.admin`, `${process.env.appName}.dokumentchat`]
 
 app.http('docQueryOpenAiV2', {
   methods: ['GET', 'POST'],
   authLevel: 'anonymous',
-  handler: async (request, context) => {
+  handler: withAuth(roles, async (request) => {
     try {
-      const accesstoken = request.headers.get('Authorization')
-      await validateToken(accesstoken, { role: [`${process.env.appName}.admin`, `${process.env.appName}.dokumentchat`] })
-      logger('info', ['docQueryOpenAiV2', 'Token validert'])
       const openai = new OpenAI()
 
       let VS, result
@@ -87,10 +86,7 @@ app.http('docQueryOpenAiV2', {
       logger('info', ['docQueryOpenAiV2', 'Success'])
       return { jsonBody: response }
     } catch (error) {
-      return {
-        status: 401,
-        body: JSON.stringify({ error: error.message })
-      }
+      return { status: 500, jsonBody: { error: error.message } }
     }
-  }
+  })
 })

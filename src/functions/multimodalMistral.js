@@ -1,27 +1,17 @@
 const { app } = require('@azure/functions')
 const { Mistral } = require('@mistralai/mistralai')
-const validateToken = require('../lib/validateToken')
+const withAuth = require('../lib/withAuth')
 const { logger } = require('@vtfk/logger')
+
+const roles = [`${process.env.appName}.basic`, `${process.env.appName}.admin`]
 
 app.http('multimodalMistral', {
   methods: ['GET', 'POST'],
   authLevel: 'anonymous',
-  handler: async (request, context) => {
-    // const openai = new OpenAI()
+  handler: withAuth(roles, async (request) => {
     const pixtral = new Mistral({ apiKey: process.env.MISTRAL_API_KEY })
     const params = await JSON.parse(await request.text())
     let msg
-    // Validate the token and the role of the user
-    try {
-      const accesstoken = request.headers.get('Authorization')
-      await validateToken(accesstoken, { role: [`${process.env.appName}.basic`, `${process.env.appName}.admin`] })
-    } catch (error) {
-      logger('error', ['multimodalMistral - Tokenvalidation', error?.message])
-      return {
-        status: 401,
-        jsonBody: { error: error.response?.data || error.message }
-      }
-    }
 
     try {
       msg = [{ role: 'system', content: params.kontekst }]
@@ -52,11 +42,9 @@ app.http('multimodalMistral', {
         temperature: params.temperature
       })
       logger('info', ['multimodalMistral', 'success'])
-      return {
-        body: JSON.stringify(completion)
-      }
+      return { jsonBody: completion }
     } catch (error) {
       logger('error', ['multimodalMistral - Noe gikk galt med chat.complete'])
     }
-  }
+  })
 })

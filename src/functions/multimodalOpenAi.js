@@ -1,28 +1,17 @@
 const { app } = require('@azure/functions')
 const { OpenAI } = require('openai')
 const { logger } = require('@vtfk/logger')
-const validateToken = require('../lib/validateToken')
-// require("dotenv").config();
+const withAuth = require('../lib/withAuth')
+
+const roles = [`${process.env.appName}.basic`, `${process.env.appName}.admin`]
 
 app.http('multimodalOpenAi', {
   methods: ['GET', 'POST'],
   authLevel: 'anonymous',
-  handler: async (request, context) => {
+  handler: withAuth(roles, async (request) => {
     const openai = new OpenAI()
     const params = await JSON.parse(await request.text())
     let msg
-
-    // Validate the token and the role of the user
-    try {
-      const accesstoken = request.headers.get('Authorization')
-      await validateToken(accesstoken, { role: [`${process.env.appName}.basic`, `${process.env.appName}.admin`] })
-    } catch (error) {
-      logger('error', ['multimodalOpenAi - Tokenvalidation', error?.message, error?.stack])
-      return {
-        status: 401,
-        jsonBody: { error: error.response?.data || error?.stack || error.message }
-      }
-    }
 
     try {
       msg = [{ role: 'system', content: params.kontekst }]
@@ -47,9 +36,7 @@ app.http('multimodalOpenAi', {
       }
     } catch (error) {
       logger('error', ['multimodalOpenAi', error?.message, error?.stack])
-      return {
-        jsonBody: { error: error.response?.data || error?.stack || error.message }
-      }
+      return { jsonBody: { error: error.response?.data || error?.stack || error.message } }
     }
     try {
       const completion = await openai.chat.completions.create({
@@ -58,14 +45,10 @@ app.http('multimodalOpenAi', {
         temperature: params.temperature
       })
       logger('info', ['multimodalOpenAi', 'success'])
-      return {
-        body: JSON.stringify(completion)
-      }
+      return { jsonBody: completion }
     } catch (error) {
       logger('error', ['multimodalOpenAi', error?.message, error?.stack])
-      return {
-        jsonBody: { error: error.response?.data || error?.stack || error.message }
-      }
+      return { jsonBody: { error: error.response?.data || error?.stack || error.message } }
     }
-  }
+  })
 })
